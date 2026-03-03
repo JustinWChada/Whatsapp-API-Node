@@ -10,3 +10,10 @@ npm install node-cron
 Notes:
 whatsapp-web.js: WhatsApp Web client
 qrcode-terminal: prints QR code in the console so you can scan
+
+but for memory sake on render:
+
+npm uninstall whatsapp-web.js puppeteer
+npm install @whiskeysockets/baileys qrcode-terminal pino
+
+i made some editions but kept the original structrue which uses whatsapp-web.js

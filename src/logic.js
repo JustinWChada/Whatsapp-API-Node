@@ -5,11 +5,25 @@ function recordDone(whatsappId, timestampIso){
     const mentees = loadMentees();
     const len = Object.keys(mentees).length;
 
-    //find menteed by whatsapp id
+    //find mentee by whatsapp id
     let targetId = null;
 
     for (const [menteeId, mentee] of Object.entries(mentees)) {
+        // Exact match
         if (mentee.whatsapp_id === whatsappId){
+            targetId = menteeId;
+            break;
+        }
+        
+        // Handle business accounts: try matching with @lid suffix
+        if (mentee.whatsapp_id === `${whatsappId}@lid`){
+            targetId = menteeId;
+            break;
+        }
+        
+        // Handle reverse: if stored ID has @lid, try matching without it
+        const storedIdWithoutLid = mentee.whatsapp_id.replace(/@lid$/, '');
+        if (storedIdWithoutLid === whatsappId){
             targetId = menteeId;
             break;
         }

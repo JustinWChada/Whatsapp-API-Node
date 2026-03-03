@@ -4,18 +4,16 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "postinstall": "npx puppeteer browsers install chrome"
+    "start": "node src/index.js"
   },
   "dependencies": {
-    "whatsapp-web.js": "*",
-    "qrcode-terminal": "*",
-    "node-cron": "*"
+    "@whiskeysockets/baileys": "^7.0.0-rc.9",
+    "node-cron": "*",
+    "pino": "^10.3.1",
+    "qrcode-terminal": "^0.12.0"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs"
- 
 }
-

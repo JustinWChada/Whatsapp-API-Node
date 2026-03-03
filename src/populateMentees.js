@@ -1,101 +1,135 @@
-const {Client, LocalAuth} = require('whatsapp-web.js');
-const {GROUP_NAME} = require('./config');
-const {saveMentees} = require('./storage');
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+} = require('@whiskeysockets/baileys');
+const qrcode = require('qrcode-terminal');
+const pino = require('pino');
+
+const { GROUP_NAME } = require('./config');
+const { saveMentees } = require('./storage');
+const { updateJidMapping, extractPhoneFromJid } = require('./jidResolver');
 
 /**
- * Utility script to populate mentees.json from a WhatsApp group
+ * Utility script to populate mentees.json AND jidMappings.json from a WhatsApp group.
  * Run once: node src/populateMentees.js
- * 
+ *
  * This will:
- * 1. Connect to WhatsApp using existing session
+ * 1. Connect to WhatsApp using the existing Baileys session
  * 2. Find the group by name
  * 3. Extract all group members
  * 4. Save them to mentees.json with their names and WhatsApp IDs
+ * 5. Save their full JIDs to jidMappings.json so the scheduler can reach them
+ *    even before they have ever sent a keyword message
  */
 
-const client = new Client({
-    authStrategy: new LocalAuth({dataPath: './session'}),
-});
+async function populateMenteesFromGroup(sock) {
+  try {
+    console.log('[POPULATE] Starting mentees population from WhatsApp group...');
+    console.log(`[POPULATE] Looking for group: "${GROUP_NAME}"`);
 
-async function populateMenteesFromGroup() {
-    try {
-        console.log('[POPULATE] Starting mentees population from WhatsApp group...');
-        console.log(`[POPULATE] Looking for group: "${GROUP_NAME}"`);
+    // Fetch all joined groups
+    const groups = await sock.groupFetchAllParticipating();
+    const groupList = Object.values(groups);
+    console.log(`[POPULATE] Total groups found: ${groupList.length}`);
 
-        // Get all chats
-        const chats = await client.getChats();
-        console.log(`[POPULATE] Total chats found: ${chats.length}`);
+    // Find the target group by name
+    const targetGroup = groupList.find(
+      (g) => g.subject.toLowerCase() === GROUP_NAME.toLowerCase()
+    );
 
-        // Find the target group
-        let targetGroup = null;
-        for (const chat of chats) {
-            if (chat.isGroup && chat.name === GROUP_NAME) {
-                targetGroup = chat;
-                break;
-            }
-        }
-
-        if (!targetGroup) {
-            console.error(`[POPULATE] ❌ Group "${GROUP_NAME}" not found!`);
-            console.log('[POPULATE] Available groups:');
-            for (const chat of chats) {
-                if (chat.isGroup) {
-                    console.log(`  - "${chat.name}"`);
-                }
-            }
-            return;
-        }
-
-        console.log(`[POPULATE] ✅ Found group: "${targetGroup.name}"`);
-
-        // Get group participants
-        const participants = targetGroup.participants;
-        console.log(`[POPULATE] Group has ${participants.length} members`);
-
-        // Build mentees object
-        const mentees = {};
-        let count = 1;
-
-        for (const participant of participants) {
-            // participant.id is the JID format like "263772345678@c.us"
-            // Extract just the number part
-            const whatsappId = participant.id.user;
-            const name = participant.name || `Member ${count}`;
-
-            mentees[`mentee_${count}`] = {
-                name: name,
-                whatsapp_id: whatsappId,
-                last_done_at: null
-            };
-
-            console.log(`[POPULATE] ${count}. ${name} (${whatsappId})`);
-            count++;
-        }
-
-        // Save to mentees.json
-        saveMentees(mentees);
-        console.log(`\n[POPULATE] ✅ Successfully saved ${Object.keys(mentees).length} mentees to mentees.json`);
-        console.log('[POPULATE] You can now delete the session folder and restart the main bot if needed');
-
-    } catch (err) {
-        console.error(`[POPULATE] ❌ Error: ${err.message}`, err);
-    } finally {
-        await client.destroy();
-        process.exit(0);
+    if (!targetGroup) {
+      console.error(`[POPULATE] ❌ Group "${GROUP_NAME}" not found!`);
+      console.log('[POPULATE] Available groups:');
+      for (const g of groupList) {
+        console.log(`  - "${g.subject}"`);
+      }
+      process.exit(1);
     }
+
+    console.log(`[POPULATE] ✅ Found group: "${targetGroup.subject}"`);
+
+    const participants = targetGroup.participants;
+    console.log(`[POPULATE] Group has ${participants.length} members`);
+
+    // Build mentees object and populate jidMappings at the same time
+    const mentees = {};
+    let count = 1;
+
+    for (const participant of participants) {
+      // participant.id is the full JID e.g. "263772345678@s.whatsapp.net" or "146922610385086@lid"
+      const fullJid = participant.id;
+      const whatsappId = extractPhoneFromJid(fullJid);
+      const jidType = fullJid.includes('@lid') ? 'business' : 'personal';
+      const name = `Member ${count} - ${whatsappId}`;
+
+      // 1. Write to mentees.json
+      mentees[`mentee_${count}`] = {
+        name,
+        whatsapp_id: whatsappId,
+        last_done_at: null,
+      };
+
+      // 2. Write to jidMappings.json immediately so the scheduler can always
+      //    reach this person, even if they never send a keyword message.
+      updateJidMapping(fullJid, whatsappId, name, jidType);
+
+      console.log(`[POPULATE] ${count}. ${name} (${fullJid})`);
+      count++;
+    }
+
+    saveMentees(mentees);
+    console.log(
+      `\n[POPULATE] ✅ Successfully saved ${Object.keys(mentees).length} mentees to mentees.json`
+    );
+    console.log('[POPULATE] ✅ JID mappings written to jidMappings.json for all members.');
+    console.log('[POPULATE] Update the "name" fields in mentees.json to real names if needed.');
+  } catch (err) {
+    console.error(`[POPULATE] ❌ Error: ${err.message}`, err);
+  } finally {
+    process.exit(0);
+  }
 }
 
-// Setup client and run
-client.on('ready', () => {
-    console.log('[POPULATE] Client is ready!');
-    populateMenteesFromGroup();
-});
+async function main() {
+  const { state, saveCreds } = await useMultiFileAuthState('./session');
+  const { version } = await fetchLatestBaileysVersion();
 
-client.on('qr', (qr) => {
-    console.log('[POPULATE] Scan this QR code to log in:');
-    const qrcode = require('qrcode-terminal');
-    qrcode.generate(qr, {small: true});
-});
+  const sock = makeWASocket({
+    version,
+    auth: state,
+    logger: pino({ level: 'silent' }),
+    syncFullHistory: false,
+    markOnlineOnConnect: false,
+    generateHighQualityLinkPreview: false,
+  });
+
+  sock.ev.on('creds.update', saveCreds);
+
+  sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
+    if (qr) {
+      console.log('[POPULATE] Scan this QR code to log in:');
+      qrcode.generate(qr, { small: true });
+    }
+
+    if (connection === 'open') {
+      console.log('[POPULATE] ✅ WhatsApp connected!');
+      await populateMenteesFromGroup(sock);
+    }
+
+    if (connection === 'close') {
+      const statusCode = lastDisconnect?.error?.output?.statusCode;
+      if (statusCode === DisconnectReason.loggedOut) {
+        console.log('[POPULATE] 🔒 Logged out. Delete ./session and re-run.');
+        process.exit(1);
+      } else {
+        console.log(`[POPULATE] ⚠️  Connection closed (code ${statusCode}). Reconnecting...`);
+        main();
+      }
+    }
+  });
+}
 
 console.log('[POPULATE] Initializing WhatsApp client...');
-client.initialize();
+main().catch(console.error);
