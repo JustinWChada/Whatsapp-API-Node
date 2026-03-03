@@ -1,0 +1,4 @@
+Dashboard home: https://whatsapp-api-node-1.onrender.com/
+Mentees table with last done dates: https://whatsapp-api-node-1.onrender.com/mentees
+All chatbox logs, newest first: https://whatsapp-api-node-1.onrender.com/logs
+Raw JID mappings JSON: https://whatsapp-api-node-1.onrender.com/mappings

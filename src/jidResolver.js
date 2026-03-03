@@ -23,68 +23,54 @@ function saveJidMappings(mappings) {
 }
 
 /**
- * Resolve a JID to its phone number and name
- * Handles both personal (@s.whatsapp.net) and business (@lid) accounts
- * 
- * Returns: { phone: "263780736090", name: "John", type: "personal|business" }
- * or null if not found
+ * Resolve a JID to its phone number and name (sync, no network calls)
  */
 function resolveJidToPhone(jid) {
   const mappings = loadJidMappings();
-  
-  // Try exact match first
+
   if (mappings.jidMappings[jid]) {
     return mappings.jidMappings[jid];
   }
-  
-  // Try without suffix
-  const plainId = jid
-    .replace(/@s\.whatsapp\.net$/, '')
-    .replace(/@g\.us$/, '')
-    .replace(/@lid$/, '')
-    .replace(/@c\.us$/, '');
-  
-  // Search for matching entry
+
+  const plainId = extractPhoneFromJid(jid);
   for (const [mappedJid, mapping] of Object.entries(mappings.jidMappings)) {
-    const mappedPlain = mappedJid
-      .replace(/@s\.whatsapp\.net$/, '')
-      .replace(/@g\.us$/, '')
-      .replace(/@lid$/, '')
-      .replace(/@c\.us$/, '');
-    
-    if (mappedPlain === plainId) {
+    if (extractPhoneFromJid(mappedJid) === plainId) {
       return mapping;
     }
   }
-  
+
   return null;
 }
 
 /**
- * Update or add a JID mapping
- * Called when a message arrives from an unknown JID
+ * Update or add a JID mapping.
+ * Only overwrites the name if the new name is a real name (not a fallback placeholder).
  */
 function updateJidMapping(jid, phone, name = null, type = 'personal') {
   const mappings = loadJidMappings();
-  
-  // Normalize JID (ensure suffix)
   const normalizedJid = normalizeJid(jid);
-  
+
   if (!mappings.jidMappings[normalizedJid]) {
     mappings.jidMappings[normalizedJid] = {};
   }
-  
-  // Update fields
+
   mappings.jidMappings[normalizedJid].phone = phone;
   mappings.jidMappings[normalizedJid].type = type;
   mappings.jidMappings[normalizedJid].lastUpdated = new Date().toISOString();
-  
-  // Only update name if provided and different
-  if (name && (!mappings.jidMappings[normalizedJid].name || 
-               mappings.jidMappings[normalizedJid].name.startsWith('No Username'))) {
-    mappings.jidMappings[normalizedJid].name = name;
+
+  const isRealName = name &&
+    !name.startsWith('No Username') &&
+    !name.startsWith('Member ');
+
+  const currentName = mappings.jidMappings[normalizedJid].name || '';
+  const currentIsPlaceholder = !currentName ||
+    currentName.startsWith('No Username') ||
+    currentName.startsWith('Member ');
+
+  if (isRealName || currentIsPlaceholder) {
+    mappings.jidMappings[normalizedJid].name = name || currentName;
   }
-  
+
   saveJidMappings(mappings);
   return mappings.jidMappings[normalizedJid];
 }
@@ -93,22 +79,13 @@ function updateJidMapping(jid, phone, name = null, type = 'personal') {
  * Normalize a JID by adding proper suffix if missing
  */
 function normalizeJid(jid) {
-  // Already has suffix
-  if (jid.includes('@')) {
-    return jid;
-  }
-  
-  // No suffix - determine type based on format
-  // Business IDs are typically longer numeric strings
-  if (jid.length > 15) {
-    return `${jid}@lid`;
-  }
-  
+  if (jid.includes('@')) return jid;
+  if (jid.length > 15) return `${jid}@lid`;
   return `${jid}@s.whatsapp.net`;
 }
 
 /**
- * Extract plain phone number from JID
+ * Extract plain phone number / ID from a full JID
  */
 function extractPhoneFromJid(jid) {
   return jid
@@ -119,112 +96,73 @@ function extractPhoneFromJid(jid) {
 }
 
 /**
- * Try to fetch contact name from Baileys (device contact list)
- * Uses contact status and availability to get the contact display name
+ * Resolve a JID to phone + name using a priority chain:
+ *
+ *  1. Saved contact name  — from contactsCache (Map populated via contacts.upsert in bot.js)
+ *                           This is the name YOU saved in your phone for this contact.
+ *  2. Push name           — the WhatsApp display name the contact set on their own profile
+ *                           (comes from msg.pushName on every incoming message)
+ *  3. Mapped name         — whatever real name is already stored in jidMappings.json
+ *  4. Fallback            — "No Username - [id]"
+ *
+ * Any resolved real name is persisted back to jidMappings.json so it survives restarts.
+ *
+ * @param {string} jid            Full JID of the sender
+ * @param {Map}    contactsCache  Map<jid, name> built from contacts.upsert events in bot.js
+ * @param {string} pushName       msg.pushName from the Baileys message (may be null/undefined)
+ *
+ * @returns {{ phone, name, type, nameSource }} or null if JID is completely unknown
  */
-async function tryFetchContactName(sock, jid) {
-  try {
-    // Extract phone number from JID
-    const plainId = jid
-      .replace(/@s\.whatsapp\.net$/, '')
-      .replace(/@g\.us$/, '')
-      .replace(/@lid$/, '')
-      .replace(/@c\.us$/, '');
-
-    // Try to get contact from Baileys
-    // This checks if there's a saved contact with this number
-    const contacts = await sock.contacts.get(plainId);
-    if (contacts && contacts.name) {
-      return contacts.name;
-    }
-
-    // Alternative: Check if contact has a status/notification name
-    const status = await sock.fetchStatus(jid).catch(() => null);
-    if (status?.status) {
-      // Status available means contact is somewhat known
-      return null; // Return null to keep fallback
-    }
-
-    return null;
-  } catch (err) {
-    // Contact fetch failed - this is normal for unknown contacts
-    return null;
-  }
-}
-
-/**
- * Resolve a JID to its phone number and name
- * Handles both personal (@s.whatsapp.net) and business (@lid) accounts
- * Includes priority-based name resolution:
- * 1. Saved contact name (from device contact list)
- * 2. jidMappings.json stored name
- * 3. Fallback: "No Username - [ID]"
- * 
- * Returns: { phone: "263780736090", name: "John", type: "personal", nameSource: "saved|mapped|fallback" }
- * or null if not found
- */
-async function resolveJidToPhoneWithName(sock, jid) {
+function resolveJidToPhoneWithName(jid, contactsCache = new Map(), pushName = null) {
   const mappings = loadJidMappings();
-  
-  // Try exact match first
+
+  // Find existing mapping — exact match first, then plain-id match
   let mapping = mappings.jidMappings[jid];
-  
-  // Try without suffix if exact match failed
   if (!mapping) {
-    const plainId = jid
-      .replace(/@s\.whatsapp\.net$/, '')
-      .replace(/@g\.us$/, '')
-      .replace(/@lid$/, '')
-      .replace(/@c\.us$/, '');
-    
-    // Search for matching entry
+    const plainId = extractPhoneFromJid(jid);
     for (const [mappedJid, mappedData] of Object.entries(mappings.jidMappings)) {
-      const mappedPlain = mappedJid
-        .replace(/@s\.whatsapp\.net$/, '')
-        .replace(/@g\.us$/, '')
-        .replace(/@lid$/, '')
-        .replace(/@c\.us$/, '');
-      
-      if (mappedPlain === plainId) {
+      if (extractPhoneFromJid(mappedJid) === plainId) {
         mapping = mappedData;
         break;
       }
     }
   }
 
-  // Build result with name resolution priority
-  const result = mapping ? { ...mapping } : null;
+  if (!mapping) return null;
 
-  if (!result) {
-    return null;
+  const result = { ...mapping };
+
+  const isReal = (n) => n && !n.startsWith('No Username') && !n.startsWith('Member ');
+
+  // --- Priority 1: saved contact name from your phone ---
+  const savedName =
+    contactsCache.get(jid) ||
+    contactsCache.get(extractPhoneFromJid(jid));
+
+  if (isReal(savedName)) {
+    result.name = savedName;
+    result.nameSource = 'saved';
+    updateJidMapping(jid, result.phone, savedName, result.type);
+    return result;
   }
 
-  // Priority 1: Try to fetch saved contact name from device
-  if (sock) {
-    try {
-      const savedContactName = await tryFetchContactName(sock, jid);
-      if (savedContactName && !savedContactName.startsWith('No Username')) {
-        result.name = savedContactName;
-        result.nameSource = 'saved';
-        // Update mapping with new contact name
-        updateJidMapping(jid, result.phone, savedContactName, result.type);
-        return result;
-      }
-    } catch (err) {
-      // Contact fetch failed, continue to fallback
-    }
+  // --- Priority 2: WhatsApp push name (the contact's own WA profile name) ---
+  if (isReal(pushName)) {
+    result.name = pushName;
+    result.nameSource = 'push';
+    updateJidMapping(jid, result.phone, pushName, result.type);
+    return result;
   }
 
-  // Priority 2: Use mapped name from jidMappings.json
-  if (result.name && !result.name.startsWith('No Username')) {
+  // --- Priority 3: name already stored in jidMappings.json ---
+  if (isReal(result.name)) {
     result.nameSource = 'mapped';
     return result;
   }
 
-  // Priority 3: Fallback to default label
-  result.name = result.name || `No Username - ${result.phone}`;
+  // --- Priority 4: fallback ---
+  result.name = `No Username - ${result.phone}`;
   result.nameSource = 'fallback';
-
   return result;
 }
 
@@ -236,5 +174,4 @@ module.exports = {
   updateJidMapping,
   normalizeJid,
   extractPhoneFromJid,
-  tryFetchContactName,
 };

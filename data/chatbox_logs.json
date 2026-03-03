@@ -82,5 +82,11 @@
     "message": "Member 3 - 273344737869874 Completed the Task on 2026-03-03T12:24:12.000Z",
     "timestamp": "2026-03-03T12:24:12.000Z",
     "type": "DONE"
+  },
+  "log_1772548834929_8ne4trw76": {
+    "whatsapp_id": "273344737869874",
+    "message": "JWC completed the drill on 2026-03-03T14:40:28.000Z",
+    "timestamp": "2026-03-03T14:40:28.000Z",
+    "type": "DONE"
   }
 }

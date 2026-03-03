@@ -1,80 +1,111 @@
-const {loadMentees, saveMentees, appendLog} = require('./storage');
-const { LATE_THRESHOLD_DAYS} = require('./config');
+const { loadMentees, saveMentees, appendLog } = require('./storage');
+const { LATE_THRESHOLD_DAYS } = require('./config');
 
-function recordDone(whatsappId, timestampIso){
+function recordDone(whatsappId, timestampIso) {
     const mentees = loadMentees();
     const len = Object.keys(mentees).length;
 
-    //find mentee by whatsapp id
     let targetId = null;
 
     for (const [menteeId, mentee] of Object.entries(mentees)) {
-        // Exact match
-        if (mentee.whatsapp_id === whatsappId){
+        if (mentee.whatsapp_id === whatsappId) {
             targetId = menteeId;
             break;
         }
-        
-        // Handle business accounts: try matching with @lid suffix
-        if (mentee.whatsapp_id === `${whatsappId}@lid`){
+        if (mentee.whatsapp_id === `${whatsappId}@lid`) {
             targetId = menteeId;
             break;
         }
-        
-        // Handle reverse: if stored ID has @lid, try matching without it
         const storedIdWithoutLid = mentee.whatsapp_id.replace(/@lid$/, '');
-        if (storedIdWithoutLid === whatsappId){
+        if (storedIdWithoutLid === whatsappId) {
             targetId = menteeId;
             break;
         }
     }
 
-    if (!targetId){
-        console.log(`[WARN] WhatsApp ID ${whatsappId} not found in mentees.json`);
-        
-        mentees[`mentee_${len + 1}`] = {name: `No Username - Mentee ${len + 1}`, whatsapp_id: whatsappId, last_done_at: null} 
-
-        saveMentees(mentees)
+    if (!targetId) {
+        console.log(`[WARN] WhatsApp ID ${whatsappId} not found in mentees.json — adding as new mentee`);
+        mentees[`mentee_${len + 1}`] = {
+            name: `No Username - Mentee ${len + 1}`,
+            whatsapp_id: whatsappId,
+            last_done_at: null,
+        };
+        saveMentees(mentees);
         return;
     }
 
     mentees[targetId].last_done_at = timestampIso;
-    saveMentees(mentees)
+    saveMentees(mentees);
 
     appendLog({
         whatsapp_id: whatsappId,
-        message: `${mentees[targetId].name} Completed the Task on ${timestampIso}`,
+        message: `${mentees[targetId].name} completed the drill on ${timestampIso}`,
         timestamp: timestampIso,
-        type: 'DONE'
+        type: 'DONE',
     });
 
-    console.log(`[LOGIC] Recorded DONE for ${mentees[targetId].name} (${whatsappId})`)
-
+    console.log(`[LOGIC] Recorded DONE for ${mentees[targetId].name} (${whatsappId})`);
 }
 
-function getLatePeople(now = new Date(), thresholdDays = LATE_THRESHOLD_DAYS){
+/**
+ * Update a mentee's display name in mentees.json when a real name is resolved.
+ * Only updates if the current stored name is still a placeholder.
+ *
+ * @param {string} whatsappId - The plain phone/ID stored in mentees.json
+ * @param {string} realName   - The resolved real name (saved contact or push name)
+ */
+function updateMenteeName(whatsappId, realName) {
+    if (!realName || realName.startsWith('No Username') || realName.startsWith('Member ')) return;
+
+    const mentees = loadMentees();
+    let updated = false;
+
+    for (const [menteeId, mentee] of Object.entries(mentees)) {
+        const idMatch =
+            mentee.whatsapp_id === whatsappId ||
+            mentee.whatsapp_id === `${whatsappId}@lid` ||
+            mentee.whatsapp_id.replace(/@lid$/, '') === whatsappId;
+
+        if (idMatch) {
+            const currentName = mentee.name || '';
+            const isPlaceholder =
+                currentName.startsWith('No Username') ||
+                currentName.startsWith('Member ');
+
+            if (isPlaceholder) {
+                mentees[menteeId].name = realName;
+                updated = true;
+                console.log(`[LOGIC] Updated mentee name: "${currentName}" → "${realName}" (${whatsappId})`);
+            }
+            break;
+        }
+    }
+
+    if (updated) saveMentees(mentees);
+}
+
+function getLatePeople(now = new Date(), thresholdDays = LATE_THRESHOLD_DAYS) {
     const mentees = loadMentees();
     const late = [];
     const nowMs = now.getTime();
     const thresholdMs = thresholdDays * 24 * 60 * 60 * 1000;
 
     for (const mentee of Object.values(mentees)) {
-        if(!mentee.last_done_at || mentee.last_done_at === null){
-            //never done => late
+        if (!mentee.last_done_at) {
             late.push(mentee);
             continue;
         }
-
         const last = new Date(mentee.last_done_at).getTime();
-        if(nowMs - last > thresholdMs){
-            late.push(mentee)
+        if (nowMs - last > thresholdMs) {
+            late.push(mentee);
         }
     }
 
-    return late
+    return late;
 }
 
 module.exports = {
     recordDone,
+    updateMenteeName,
     getLatePeople,
 };
