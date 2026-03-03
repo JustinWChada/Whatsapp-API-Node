@@ -70,5 +70,17 @@
     "message": "Sent late reminder to Member 5 - 223484546404488",
     "timestamp": "2026-03-03T11:40:04.709Z",
     "type": "LATE"
+  },
+  "log_1772540354818_ns5ej9mfr": {
+    "whatsapp_id": "273344737869874",
+    "message": "Member 3 - 273344737869874 Completed the Task on 2026-03-03T12:19:08.000Z",
+    "timestamp": "2026-03-03T12:19:08.000Z",
+    "type": "DONE"
+  },
+  "log_1772540657659_6mgnr2i1x": {
+    "whatsapp_id": "273344737869874",
+    "message": "Member 3 - 273344737869874 Completed the Task on 2026-03-03T12:24:12.000Z",
+    "timestamp": "2026-03-03T12:24:12.000Z",
+    "type": "DONE"
   }
 }

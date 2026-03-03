@@ -1,7 +1,7 @@
 module.exports = {
     GROUP_NAME: "TestingGroup", //whatsapp group name
     DONE_KEYWORDS: ['prayer', 'study', 'quiet time'],
-    LATE_THRESHOLD_DAYS: 2,
+    LATE_THRESHOLD_DAYS: 1,
     REMINDER_MESSAGE_TEMPLATE: (name) => `Hi ${name}, please remember to do drill tasks for Mentorsship sessions! Remember these drills are for you not only for attendance.`,   
 };
 
