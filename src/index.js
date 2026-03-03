@@ -184,7 +184,7 @@ function startSelfPing() {
     } catch (err) {
       console.warn('[PING] Self-ping failed:', err.message);
     }
-  }, ); // every 10 minutes
+  }, 10 * 60 * 1000); // every 10 minutes
 }
 
 async function main() {
