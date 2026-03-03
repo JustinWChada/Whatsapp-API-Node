@@ -12,7 +12,7 @@ const {loadJidMappings} = require('./jidResolver');
 function setupReminderScheduler(client) {
     // every day at 20:00 server time
 
-    cron.schedule('30 17 * * *', async () => {
+    cron.schedule('0 18 * * *', async () => {
         console.log('[SCHEDULER] Running late reminder job...');
         const late = getLatePeople(new Date());
 
