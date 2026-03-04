@@ -62,7 +62,7 @@ function renderMenteesHtml(mentees) {
     <a href="/logs">Logs</a>
     <a href="/mappings">JID Mappings</a>
   </nav>
-  <h1>👥 Mentees</h1>
+  <h1>Mentees</h1>
   <table>
     <thead><tr><th>ID</th><th>Name</th><th>WhatsApp ID</th><th>Last Done At</th></tr></thead>
     <tbody>${rows}</tbody>
@@ -104,7 +104,7 @@ function renderLogsHtml(logs) {
     <a href="/logs">Logs</a>
     <a href="/mappings">JID Mappings</a>
   </nav>
-  <h1>📋 Chatbox Logs</h1>
+  <h1>Chatbox Logs</h1>
   <table>
     <thead><tr><th>Type</th><th>WhatsApp ID</th><th>Message</th><th>Timestamp</th></tr></thead>
     <tbody>${rows}</tbody>
@@ -132,11 +132,11 @@ const server = http.createServer((req, res) => {
   </style>
 </head>
 <body>
-  <h1>🤖 Mentorship Bot Dashboard</h1>
+  <h1>Mentorship Drill Bot Dashboard</h1>
   <p>Uptime: ${Math.floor(process.uptime())}s</p>
-  <a href="/mentees">👥 Mentees</a>
-  <a href="/logs">📋 Logs</a>
-  <a href="/mappings">🔗 JID Mappings</a>
+  <a href="/mentees">Mentees</a>
+  <a href="/logs">Logs</a>
+  <a href="/mappings">JID Mappings</a>
 </body>
 </html>`);
   }
