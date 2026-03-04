@@ -8,7 +8,7 @@ const qrcode = require('qrcode-terminal');
 const pino = require('pino');
 
 const { recordDone, updateMenteeName } = require('./logic');
-const { setupReminderScheduler } = require('./scheduler');
+const { setupReminderScheduler, setConnected } = require('./scheduler');
 const { GROUP_NAME, DONE_KEYWORDS } = require('./config');
 const {
   resolveJidToPhoneWithName,
@@ -65,10 +65,12 @@ async function initializeBot() {
 
     if (connection === 'open') {
       console.log('WhatsApp Client Ready!');
+      setConnected(true);
       setupReminderScheduler(sock);
     }
 
     if (connection === 'close') {
+      setConnected(false);
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const loggedOut = statusCode === DisconnectReason.loggedOut;
 
