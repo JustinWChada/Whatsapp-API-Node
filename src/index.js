@@ -61,6 +61,7 @@ function renderMenteesHtml(mentees) {
     <a href="/mentees">Mentees</a>
     <a href="/logs">Logs</a>
     <a href="/mappings">JID Mappings</a>
+    <a href= "/bot-presentation.html">Docs</a>
   </nav>
   <h1>Mentees</h1>
   <table>
