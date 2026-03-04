@@ -62,7 +62,7 @@ function renderMenteesHtml(mentees) {
     <a href="/mentees">Mentees</a>
     <a href="/logs">Logs</a>
     <a href="/mappings">JID Mappings</a>
-    <a href= "/docs">Docs</a>
+    <a href="/docs">Docs</a>
   </nav>
   <h1>Mentees</h1>
   <table>
@@ -105,7 +105,7 @@ function renderLogsHtml(logs) {
     <a href="/mentees">Mentees</a>
     <a href="/logs">Logs</a>
     <a href="/mappings">JID Mappings</a>
-    <a href= "/docs">Docs</a>
+    <a href="/docs">Docs</a>
   </nav>
   <h1>Chatbox Logs</h1>
   <table>
@@ -140,7 +140,7 @@ const server = http.createServer((req, res) => {
   <a href="/mentees">Mentees</a>
   <a href="/logs">Logs</a>
   <a href="/mappings">JID Mappings</a>
-  <a href= "/docs">Docs</a>
+  <a href="/docs">Docs</a>
 </body>
 </html>`);
   }
@@ -166,13 +166,13 @@ const server = http.createServer((req, res) => {
     return sendJson(res, data);
   }
 
-   // ----- JID Mappings (raw JSON) -----
+  // ----- Docs -----
   if (url === '/docs') {
-    const filePath = docsPath;
-    fs.readFile(filePath, 'utf8', (err, data) => {
-      if (err) return sendJson(res, { error: 'Documentation (bot-presentation.html) not found' }, 404);
-      return sendHtml(res, data);
-    });
+    if (!fs.existsSync(docsPath)) {
+      return sendJson(res, { error: 'Documentation (bot-presentation.html) not found. Make sure the file is in the project root.' }, 404);
+    }
+    const data = fs.readFileSync(docsPath, 'utf8');
+    return sendHtml(res, data);
   }
 
   // ----- 404 -----
