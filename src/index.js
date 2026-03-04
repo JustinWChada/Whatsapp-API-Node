@@ -121,7 +121,7 @@ const server = http.createServer((req, res) => {
     return sendHtml(res, `<!DOCTYPE html>
 <html>
 <head>
-  <title>Mentorship Bot</title>
+  <title>Drill Bot</title>
   <style>
     body { font-family: sans-serif; padding: 40px; background: #f9f9f9; text-align: center; }
     h1 { color: #333; }
