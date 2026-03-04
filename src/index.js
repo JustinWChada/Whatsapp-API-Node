@@ -9,6 +9,7 @@ const PORT = process.env.PORT || 3000;
 const menteesPath = path.join(__dirname, '..', 'data', 'mentees.json');
 const logsPath = path.join(__dirname, '..', 'data', 'chatbox_logs.json');
 const jidMappingsPath = path.join(__dirname, '..', 'data', 'jidMappings.json');
+const docsPath = path.join(__dirname, '..', 'bot-presentation.html');
 
 function readJsonFile(filePath) {
   if (!fs.existsSync(filePath)) return null;
@@ -61,7 +62,7 @@ function renderMenteesHtml(mentees) {
     <a href="/mentees">Mentees</a>
     <a href="/logs">Logs</a>
     <a href="/mappings">JID Mappings</a>
-    <a href= "/bot-presentation.html">Docs</a>
+    <a href= "/docs">Docs</a>
   </nav>
   <h1>Mentees</h1>
   <table>
@@ -104,6 +105,7 @@ function renderLogsHtml(logs) {
     <a href="/mentees">Mentees</a>
     <a href="/logs">Logs</a>
     <a href="/mappings">JID Mappings</a>
+    <a href= "/docs">Docs</a>
   </nav>
   <h1>Chatbox Logs</h1>
   <table>
@@ -138,6 +140,7 @@ const server = http.createServer((req, res) => {
   <a href="/mentees">Mentees</a>
   <a href="/logs">Logs</a>
   <a href="/mappings">JID Mappings</a>
+  <a href= "/docs">Docs</a>
 </body>
 </html>`);
   }
@@ -161,6 +164,15 @@ const server = http.createServer((req, res) => {
     const data = readJsonFile(jidMappingsPath);
     if (!data) return sendJson(res, { error: 'jidMappings.json not found' }, 404);
     return sendJson(res, data);
+  }
+
+   // ----- JID Mappings (raw JSON) -----
+  if (url === '/docs') {
+    const filePath = docsPath;
+    fs.readFile(filePath, 'utf8', (err, data) => {
+      if (err) return sendJson(res, { error: 'Documentation (bot-presentation.html) not found' }, 404);
+      return sendHtml(res, data);
+    });
   }
 
   // ----- 404 -----
