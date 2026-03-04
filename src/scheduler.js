@@ -5,8 +5,7 @@ const { appendLog } = require('./storage');
 const { loadJidMappings } = require('./jidResolver');
 
 function setupReminderScheduler(client) {
-  // FIX: was 50 16 (4:50 PM) — corrected to 10:00 AM every day
-  cron.schedule('0 10 * * *', async () => {
+  cron.schedule('30 10 * * *', async () => {
     console.log('[SCHEDULER] Running late reminder job...');
     const late = getLatePeople(new Date());
 
