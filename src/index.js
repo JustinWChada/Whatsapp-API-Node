@@ -62,11 +62,11 @@ function renderMenteesHtml(mentees) {
     <a href="/mentees">Mentees</a>
     <a href="/logs">Logs</a>
     <a href="/mappings">JID Mappings</a>
-    <a href="/docs">Docs</a>
+    <a href= "/docs">Docs</a>
   </nav>
   <h1>Mentees</h1>
   <table>
-    <thead><tr><th>ID</th><th>Name</th><th>WhatsApp ID</th><th>Last Done At</th></tr></thead>
+    <thead><tr><th>ID</th><th>Name</th><th>Phone Number</th><th>WhatsApp ID</th><th>Last Done At</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>
 </body>
@@ -105,7 +105,7 @@ function renderLogsHtml(logs) {
     <a href="/mentees">Mentees</a>
     <a href="/logs">Logs</a>
     <a href="/mappings">JID Mappings</a>
-    <a href="/docs">Docs</a>
+    <a href= "/docs">Docs</a>
   </nav>
   <h1>Chatbox Logs</h1>
   <table>
@@ -116,6 +116,57 @@ function renderLogsHtml(logs) {
 </html>`;
 }
 
+
+// HTML table renderer for JID mappings
+function renderMappingsHtml(data) {
+  const entries = Object.entries(data.jidMappings);
+  const rows = entries.map(([jid, m]) => {
+    const type = m.type === 'business'
+      ? '<span style="background:#fff3cd;padding:2px 6px;border-radius:4px;font-size:0.75em">business</span>'
+      : '<span style="background:#d4edda;padding:2px 6px;border-radius:4px;font-size:0.75em">personal</span>';
+    const phoneNum = m.phone_number || '<span style="color:#aaa">—</span>';
+    const name = m.name || '<span style="color:#aaa">—</span>';
+    const updated = m.lastUpdated ? new Date(m.lastUpdated).toLocaleString() : '—';
+    return `<tr>
+      <td style="font-size:0.8em;color:#666">${jid}</td>
+      <td>${name}</td>
+      <td><strong>${phoneNum}</strong></td>
+      <td>${type}</td>
+      <td style="font-size:0.8em">${updated}</td>
+    </tr>`;
+  }).join('');
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <title>JID Mappings</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; background: #f9f9f9; }
+    h1 { color: #333; }
+    table { border-collapse: collapse; width: 100%; background: white; }
+    th { background: #333; color: white; padding: 10px; text-align: left; }
+    td { padding: 8px 10px; border-bottom: 1px solid #ddd; }
+    tr:hover { background: #f5f5f5; }
+    nav a { margin-right: 15px; text-decoration: none; color: #4CAF50; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href=/>Home</a>
+    <a href=/mentees>Mentees</a>
+    <a href=/logs>Logs</a>
+    <a href=/mappings>JID Mappings</a>
+    <a href=/docs>Docs</a>
+  </nav>
+  <h1>JID Mappings</h1>
+  <p style="color:#666;font-size:0.85em;margin-bottom:12px">${entries.length} contacts mapped</p>
+  <table>
+    <thead><tr><th>JID</th><th>Name</th><th>Phone Number</th><th>Type</th><th>Last Updated</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+</body>
+</html>`;
+}
 const server = http.createServer((req, res) => {
   const url = req.url;
 
@@ -140,7 +191,7 @@ const server = http.createServer((req, res) => {
   <a href="/mentees">Mentees</a>
   <a href="/logs">Logs</a>
   <a href="/mappings">JID Mappings</a>
-  <a href="/docs">Docs</a>
+  <a href= "/docs">Docs</a>
 </body>
 </html>`);
   }
@@ -166,13 +217,13 @@ const server = http.createServer((req, res) => {
     return sendJson(res, data);
   }
 
-  // ----- Docs -----
+   // ----- JID Mappings (raw JSON) -----
   if (url === '/docs') {
-    if (!fs.existsSync(docsPath)) {
-      return sendJson(res, { error: 'Documentation (bot-presentation.html) not found. Make sure the file is in the project root.' }, 404);
-    }
-    const data = fs.readFileSync(docsPath, 'utf8');
-    return sendHtml(res, data);
+    const filePath = docsPath;
+    fs.readFile(filePath, 'utf8', (err, data) => {
+      if (err) return sendJson(res, { error: 'Documentation (bot-presentation.html) not found' }, 404);
+      return sendHtml(res, data);
+    });
   }
 
   // ----- 404 -----

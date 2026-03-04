@@ -1,177 +1,116 @@
-const fs = require('fs');
-const path = require('path');
+const { loadMentees, saveMentees, appendLog } = require('./storage');
+const { LATE_THRESHOLD_DAYS } = require('./config');
 
-const jidMappingsPath = path.join(__dirname, '..', 'data', 'jidMappings.json');
+function recordDone(whatsappId, timestampIso) {
+    const mentees = loadMentees();
+    const len = Object.keys(mentees).length;
 
-/**
- * Load JID mappings from disk
- */
-function loadJidMappings() {
-  if (!fs.existsSync(jidMappingsPath)) {
-    return { jidMappings: {} };
-  }
-  const raw = fs.readFileSync(jidMappingsPath, 'utf8');
-  if (!raw.trim()) return { jidMappings: {} };
-  return JSON.parse(raw);
-}
+    let targetId = null;
 
-/**
- * Save JID mappings to disk
- */
-function saveJidMappings(mappings) {
-  fs.writeFileSync(jidMappingsPath, JSON.stringify(mappings, null, 2));
-}
-
-/**
- * Resolve a JID to its phone number and name (sync, no network calls)
- */
-function resolveJidToPhone(jid) {
-  const mappings = loadJidMappings();
-
-  if (mappings.jidMappings[jid]) {
-    return mappings.jidMappings[jid];
-  }
-
-  const plainId = extractPhoneFromJid(jid);
-  for (const [mappedJid, mapping] of Object.entries(mappings.jidMappings)) {
-    if (extractPhoneFromJid(mappedJid) === plainId) {
-      return mapping;
+    for (const [menteeId, mentee] of Object.entries(mentees)) {
+        if (mentee.whatsapp_id === whatsappId) {
+            targetId = menteeId;
+            break;
+        }
+        if (mentee.whatsapp_id === `${whatsappId}@lid`) {
+            targetId = menteeId;
+            break;
+        }
+        const storedIdWithoutLid = mentee.whatsapp_id.replace(/@lid$/, '');
+        if (storedIdWithoutLid === whatsappId) {
+            targetId = menteeId;
+            break;
+        }
     }
-  }
 
-  return null;
-}
-
-/**
- * Update or add a JID mapping.
- * Only overwrites the name if the new name is a real name (not a fallback placeholder).
- */
-function updateJidMapping(jid, phone, name = null, type = 'personal') {
-  const mappings = loadJidMappings();
-  const normalizedJid = normalizeJid(jid);
-
-  if (!mappings.jidMappings[normalizedJid]) {
-    mappings.jidMappings[normalizedJid] = {};
-  }
-
-  mappings.jidMappings[normalizedJid].phone = phone;
-  mappings.jidMappings[normalizedJid].type = type;
-  mappings.jidMappings[normalizedJid].lastUpdated = new Date().toISOString();
-
-  const isRealName = name &&
-    !name.startsWith('No Username') &&
-    !name.startsWith('Member ');
-
-  const currentName = mappings.jidMappings[normalizedJid].name || '';
-  const currentIsPlaceholder = !currentName ||
-    currentName.startsWith('No Username') ||
-    currentName.startsWith('Member ');
-
-  if (isRealName || currentIsPlaceholder) {
-    mappings.jidMappings[normalizedJid].name = name || currentName;
-  }
-
-  saveJidMappings(mappings);
-  return mappings.jidMappings[normalizedJid];
-}
-
-/**
- * Normalize a JID by adding proper suffix if missing
- */
-function normalizeJid(jid) {
-  if (jid.includes('@')) return jid;
-  if (jid.length > 15) return `${jid}@lid`;
-  return `${jid}@s.whatsapp.net`;
-}
-
-/**
- * Extract plain phone number / ID from a full JID
- */
-function extractPhoneFromJid(jid) {
-  return jid
-    .replace(/@s\.whatsapp\.net$/, '')
-    .replace(/@g\.us$/, '')
-    .replace(/@lid$/, '')
-    .replace(/@c\.us$/, '');
-}
-
-/**
- * Resolve a JID to phone + name using a priority chain:
- *
- *  1. Saved contact name  — from contactsCache (Map populated via contacts.upsert in bot.js)
- *                           This is the name YOU saved in your phone for this contact.
- *  2. Push name           — the WhatsApp display name the contact set on their own profile
- *                           (comes from msg.pushName on every incoming message)
- *  3. Mapped name         — whatever real name is already stored in jidMappings.json
- *  4. Fallback            — "No Username - [id]"
- *
- * Any resolved real name is persisted back to jidMappings.json so it survives restarts.
- *
- * @param {string} jid            Full JID of the sender
- * @param {Map}    contactsCache  Map<jid, name> built from contacts.upsert events in bot.js
- * @param {string} pushName       msg.pushName from the Baileys message (may be null/undefined)
- *
- * @returns {{ phone, name, type, nameSource }} or null if JID is completely unknown
- */
-function resolveJidToPhoneWithName(jid, contactsCache = new Map(), pushName = null) {
-  const mappings = loadJidMappings();
-
-  // Find existing mapping — exact match first, then plain-id match
-  let mapping = mappings.jidMappings[jid];
-  if (!mapping) {
-    const plainId = extractPhoneFromJid(jid);
-    for (const [mappedJid, mappedData] of Object.entries(mappings.jidMappings)) {
-      if (extractPhoneFromJid(mappedJid) === plainId) {
-        mapping = mappedData;
-        break;
-      }
+    if (!targetId) {
+        console.log(`[WARN] WhatsApp ID ${whatsappId} not found in mentees.json — adding as new mentee`);
+        mentees[`mentee_${len + 1}`] = {
+            name: `No Username - Mentee ${len + 1}`,
+            whatsapp_id: whatsappId,
+            last_done_at: null,
+        };
+        saveMentees(mentees);
+        return;
     }
-  }
 
-  if (!mapping) return null;
+    mentees[targetId].last_done_at = timestampIso;
+    saveMentees(mentees);
 
-  const result = { ...mapping };
+    appendLog({
+        whatsapp_id: whatsappId,
+        message: `${mentees[targetId].name} completed the drill on ${timestampIso}`,
+        timestamp: timestampIso,
+        type: 'DONE',
+    });
 
-  const isReal = (n) => n && !n.startsWith('No Username') && !n.startsWith('Member ');
+    console.log(`[LOGIC] Recorded DONE for ${mentees[targetId].name} (${whatsappId})`);
+}
 
-  // --- Priority 1: saved contact name from your phone ---
-  const savedName =
-    contactsCache.get(jid) ||
-    contactsCache.get(extractPhoneFromJid(jid));
+/**
+ * Update a mentee's display name in mentees.json when a real name is resolved.
+ * Only updates if the current stored name is still a placeholder.
+ *
+ * @param {string} whatsappId - The plain phone/ID stored in mentees.json
+ * @param {string} realName   - The resolved real name (saved contact or push name)
+ */
+function updateMenteeName(whatsappId, realName) {
+    if (!realName || realName.startsWith('No Username') || realName.startsWith('Member ')) return;
 
-  if (isReal(savedName)) {
-    result.name = savedName;
-    result.nameSource = 'saved';
-    updateJidMapping(jid, result.phone, savedName, result.type);
-    return result;
-  }
+    const mentees = loadMentees();
+    let updated = false;
 
-  // --- Priority 2: WhatsApp push name (the contact's own WA profile name) ---
-  if (isReal(pushName)) {
-    result.name = pushName;
-    result.nameSource = 'push';
-    updateJidMapping(jid, result.phone, pushName, result.type);
-    return result;
-  }
+    for (const [menteeId, mentee] of Object.entries(mentees)) {
+        const idMatch =
+            mentee.whatsapp_id === whatsappId ||
+            mentee.whatsapp_id === `${whatsappId}@lid` ||
+            mentee.whatsapp_id.replace(/@lid$/, '') === whatsappId;
 
-  // --- Priority 3: name already stored in jidMappings.json ---
-  if (isReal(result.name)) {
-    result.nameSource = 'mapped';
-    return result;
-  }
+        if (idMatch) {
+            const currentName = mentee.name || '';
+            const isPlaceholder =
+                currentName.startsWith('No Username') ||
+                currentName.startsWith('Member ');
 
-  // --- Priority 4: fallback ---
-  result.name = `No Username - ${result.phone}`;
-  result.nameSource = 'fallback';
-  return result;
+            if (isPlaceholder) {
+                mentees[menteeId].name = realName;
+                // Store the actual phone number alongside the name.
+                // Personal accounts: the whatsappId is the phone number, add + prefix.
+                // Business accounts: store as-is.
+                const isBusiness = mentee.whatsapp_id.includes('@lid') || whatsappId.length > 15;
+                mentees[menteeId].phone_number = isBusiness ? whatsappId : '+' + whatsappId;
+                updated = true;
+                console.log(`[LOGIC] Updated mentee name: "${currentName}" → "${realName}" | phone: ${mentees[menteeId].phone_number} (${whatsappId})`);
+            }
+            break;
+        }
+    }
+
+    if (updated) saveMentees(mentees);
+}
+
+function getLatePeople(now = new Date(), thresholdDays = LATE_THRESHOLD_DAYS) {
+    const mentees = loadMentees();
+    const late = [];
+    const nowMs = now.getTime();
+    const thresholdMs = thresholdDays * 24 * 60 * 60 * 1000;
+
+    for (const mentee of Object.values(mentees)) {
+        if (!mentee.last_done_at) {
+            late.push(mentee);
+            continue;
+        }
+        const last = new Date(mentee.last_done_at).getTime();
+        if (nowMs - last > thresholdMs) {
+            late.push(mentee);
+        }
+    }
+
+    return late;
 }
 
 module.exports = {
-  loadJidMappings,
-  saveJidMappings,
-  resolveJidToPhone,
-  resolveJidToPhoneWithName,
-  updateJidMapping,
-  normalizeJid,
-  extractPhoneFromJid,
+    recordDone,
+    updateMenteeName,
+    getLatePeople,
 };

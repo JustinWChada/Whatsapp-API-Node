@@ -65,9 +65,11 @@ async function populateMenteesFromGroup(sock) {
       const name = `Member ${count} - ${whatsappId}`;
 
       // 1. Write to mentees.json
+      const isBusiness = fullJid.includes('@lid') || whatsappId.length > 15;
       mentees[`mentee_${count}`] = {
         name,
         whatsapp_id: whatsappId,
+        phone_number: isBusiness ? whatsappId : '+' + whatsappId,
         last_done_at: null,
       };
 
