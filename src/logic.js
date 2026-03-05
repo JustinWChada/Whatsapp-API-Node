@@ -74,8 +74,17 @@ function updateMenteeName(whatsappId, realName) {
 
             if (isPlaceholder) {
                 mentees[menteeId].name = realName;
+                // phone_number is only meaningful for @s.whatsapp.net contacts.
+                // @lid IDs are internal WhatsApp IDs — not real phone numbers.
+                // The real phone_number gets populated via contacts.upsert in bot.js.
+                // Here we only set it if the whatsappId looks like a real phone number
+                // (i.e. it was resolved from an @s.whatsapp.net JID, typically 7-15 digits).
+                const isRealPhone = /^\d{7,15}$/.test(whatsappId) && whatsappId.length <= 15;
+                if (isRealPhone) {
+                  mentees[menteeId].phone_number = '+' + whatsappId;
+                }
                 updated = true;
-                console.log(`[LOGIC] Updated mentee name: "${currentName}" → "${realName}" (${whatsappId})`);
+                console.log(`[LOGIC] Updated mentee name: "${currentName}" → "${realName}" | phone: ${mentees[menteeId].phone_number} (${whatsappId})`);
             }
             break;
         }
@@ -91,7 +100,7 @@ function getLatePeople(now = new Date(), thresholdDays = LATE_THRESHOLD_DAYS) {
     const thresholdMs = thresholdDays * 24 * 60 * 60 * 1000;
 
     for (const mentee of Object.values(mentees)) {
-        if (!mentee.last_done_at) {
+        if (!mentee.last_done_at || mentee.last_done_at === null) {
             late.push(mentee);
             continue;
         }
@@ -104,8 +113,39 @@ function getLatePeople(now = new Date(), thresholdDays = LATE_THRESHOLD_DAYS) {
     return late;
 }
 
+
+/**
+ * Update a mentee's real phone number in mentees.json.
+ * Called by the scheduler when sendMessage returns an @s.whatsapp.net JID,
+ * meaning we now know the actual dialable phone number for this mentee.
+ *
+ * @param {string} whatsappId  - The @lid plain ID stored in mentees.json
+ * @param {string} realPhone   - The real phone number extracted from @s.whatsapp.net JID
+ */
+function updateMenteePhone(whatsappId, realPhone) {
+    const mentees = loadMentees();
+    let updated = false;
+
+    for (const [menteeId, mentee] of Object.entries(mentees)) {
+        const idMatch =
+            mentee.whatsapp_id === whatsappId ||
+            mentee.whatsapp_id.replace(/@lid$/, '') === whatsappId;
+
+        if (idMatch) {
+            if (!mentee.phone_number || mentee.phone_number === null) {
+                mentees[menteeId].phone_number = '+' + realPhone;
+                updated = true;
+                console.log('[LOGIC] Updated real phone for ' + (mentee.name || whatsappId) + ': +' + realPhone);
+            }
+            break;
+        }
+    }
+
+    if (updated) saveMentees(mentees);
+}
 module.exports = {
     recordDone,
     updateMenteeName,
     getLatePeople,
+    updateMenteePhone,
 };

@@ -2,35 +2,28 @@ const cron = require('node-cron');
 const { getLatePeople } = require('./logic');
 const { REMINDER_MESSAGE_TEMPLATE } = require('./config');
 const { appendLog } = require('./storage');
-const { loadJidMappings } = require('./jidResolver');
+const { loadJidMappings, updateJidMapping, extractPhoneFromJid } = require('./jidResolver');
+const { updateMenteeName, updateMenteePhone } = require('./logic');
 
-// Track whether the WhatsApp socket is currently connected.
-// The scheduler checks this before attempting to send — if the socket
-// is reconnecting at the time the cron fires, reminders are queued
-// and retried once the connection is restored.
 let isConnected = false;
 let pendingReminderJob = false;
+let currentClient = null;
+
 
 function setConnected(status) {
   const wasDisconnected = !isConnected && status;
   isConnected = status;
-
-  // If we just reconnected and a reminder run was missed, run it now
   if (wasDisconnected && pendingReminderJob) {
     console.log('[SCHEDULER] Socket reconnected — running missed reminder job now...');
     pendingReminderJob = false;
-    // Small delay to let the socket fully stabilise before sending
-    setTimeout(() => runReminderJob(currentClient), 5000);
+    setTimeout(() => runReminderJob(currentClient), 10000);
   }
 }
 
-let currentClient = null;
-
 async function runReminderJob(client) {
   if (!client) return;
-
   if (!isConnected) {
-    console.log('[SCHEDULER] Socket not connected — queuing reminder job for when it reconnects...');
+    console.log('[SCHEDULER] Socket not connected — queuing reminder job...');
     pendingReminderJob = true;
     return;
   }
@@ -48,7 +41,7 @@ async function runReminderJob(client) {
 
   for (const mentee of late) {
     try {
-      // Resolve best name: jidMappings first (has real names), fallback to mentees.json name
+      // --- Resolve best name ---
       let bestName = mentee.name;
       for (const [, mapping] of Object.entries(mappings)) {
         if (mapping.phone === mentee.whatsapp_id) {
@@ -63,7 +56,7 @@ async function runReminderJob(client) {
 
       const text = REMINDER_MESSAGE_TEMPLATE(bestName);
 
-      // Resolve JID
+      // --- Resolve JID to send to ---
       let targetJid = null;
       for (const [jid, mapping] of Object.entries(mappings)) {
         if (mapping.phone === mentee.whatsapp_id) {
@@ -71,7 +64,6 @@ async function runReminderJob(client) {
           break;
         }
       }
-
       if (!targetJid) {
         targetJid = mentee.whatsapp_id.length > 15
           ? mentee.whatsapp_id + '@lid'
@@ -80,17 +72,48 @@ async function runReminderJob(client) {
       }
 
       console.log('[SCHEDULER] Sending reminder to "' + bestName + '" via ' + targetJid);
-      await client.sendMessage(targetJid, { text });
+
+      // --- Send the message ---
+      // Baileys returns the sent message object — this contains the ACTUAL
+      // remoteJid that WhatsApp used to deliver the message.
+      // If Baileys internally resolved @lid to @s.whatsapp.net, we capture that
+      // and save it back so we have the real phone number going forward.
+      const sentMsg = await client.sendMessage(targetJid, { text });
+      
+      // Extract the actual JID Baileys used for delivery
+      const actualJid = sentMsg?.key?.remoteJid || targetJid;
+      
+      if (actualJid && actualJid !== targetJid) {
+        // Baileys used a different JID (e.g. resolved @lid -> @s.whatsapp.net)
+        const actualPhone = extractPhoneFromJid(actualJid);
+        const actualType = actualJid.includes('@lid') ? 'lid' : 'personal';
+        console.log('[SCHEDULER] Actual JID from sent message: ' + actualJid + ' (was ' + targetJid + ')');
+        
+        // Save the resolved JID and real phone number to jidMappings.json
+        updateJidMapping(actualJid, actualPhone, bestName, actualType);
+        
+        // Also update mentees.json with the real phone number
+        if (actualJid.includes('@s.whatsapp.net')) {
+          updateMenteeName(mentee.whatsapp_id, bestName);
+          updateMenteePhone(mentee.whatsapp_id, actualPhone);
+        }
+      } else {
+        // Same JID was used — still update lastUpdated so we know it was verified
+        const existingType = targetJid.includes('@lid') ? 'lid' : 'personal';
+        updateJidMapping(targetJid, mentee.whatsapp_id, bestName, existingType);
+        console.log('[SCHEDULER] JID verified via successful send: ' + targetJid);
+      }
 
       const ts = new Date().toISOString();
       appendLog({
         whatsapp_id: mentee.whatsapp_id,
-        message: 'Sent late reminder to ' + bestName,
+        message: 'Sent late reminder to ' + bestName + ' via ' + actualJid,
         timestamp: ts,
         type: 'LATE',
       });
 
       console.log('[SCHEDULER] Reminder sent to "' + bestName + '" (' + mentee.whatsapp_id + ')');
+
     } catch (err) {
       console.error('[SCHEDULER] Failed to send reminder to ' + mentee.name + ':', err.message);
     }
@@ -101,13 +124,11 @@ function setupReminderScheduler(client) {
   currentClient = client;
 
   // IST is UTC+5:30, so 10:00 AM IST = 04:30 AM UTC
-  cron.schedule('30 4 * * *', () => {
+  cron.schedule('0 10 * * *', () => {
     runReminderJob(client);
-  }, {
-    timezone: 'UTC'
-  });
+  }, { timezone: 'Asia/Kolkata' });
 
-  console.log('[SCHEDULER] Reminder job scheduled for 10:00 AM IST (04:30 UTC) daily.');
+  console.log('[SCHEDULER] Reminder job scheduled for 10:00 AM IST daily.');
 }
 
-module.exports = { setupReminderScheduler, setConnected };
+module.exports = { setupReminderScheduler, setConnected}; // export runReminderJob

@@ -1,46 +1,56 @@
-const http = require('http');
-const fs = require('fs');
-const path = require('path');
-const { initializeBot } = require('./bot');
+const http = require("http");
+const fs = require("fs");
+const path = require("path");
+const { initializeBot } = require("./bot");
+const { getLatePeople } = require("./logic");
 
 const PORT = process.env.PORT || 3000;
 
 // Paths to data files
-const menteesPath = path.join(__dirname, '..', 'data', 'mentees.json');
-const logsPath = path.join(__dirname, '..', 'data', 'chatbox_logs.json');
-const jidMappingsPath = path.join(__dirname, '..', 'data', 'jidMappings.json');
-const docsPath = path.join(__dirname, '..', 'bot-presentation.html');
+const menteesPath = path.join(__dirname, "..", "data", "mentees.json");
+const logsPath = path.join(__dirname, "..", "data", "chatbox_logs.json");
+const jidMappingsPath = path.join(__dirname, "..", "data", "jidMappings.json");
+const docsPath = path.join(__dirname, "..", "bot-presentation.html");
 
 function readJsonFile(filePath) {
   if (!fs.existsSync(filePath)) return null;
-  const raw = fs.readFileSync(filePath, 'utf8');
+  const raw = fs.readFileSync(filePath, "utf8");
   if (!raw.trim()) return null;
   return JSON.parse(raw);
 }
 
 function sendJson(res, data, status = 200) {
-  res.writeHead(status, { 'Content-Type': 'application/json' });
+  res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(data, null, 2));
 }
 
 function sendHtml(res, html) {
-  res.writeHead(200, { 'Content-Type': 'text/html' });
+  res.writeHead(200, { "Content-Type": "text/html" });
   res.end(html);
 }
 
 // Simple HTML table renderer for mentees
 function renderMenteesHtml(mentees) {
-  const rows = Object.entries(mentees).map(([id, m]) => {
-    const lastDone = m.last_done_at
-      ? new Date(m.last_done_at).toLocaleString()
-      : '<span style="color:red">Never</span>';
-    return `<tr>
+  const rows = Object.entries(mentees)
+    .map(([id, m]) => {
+      const lastDone = m.last_done_at
+        ? new Date(m.last_done_at).toLocaleString()
+        : '<span style="color:red">Never</span>';
+      // A phone_number that equals '+' + whatsapp_id means it was incorrectly
+      // derived from a @lid internal ID, not a real dialable number — hide it.
+      const isRealPhone = m.phone_number && m.phone_number !== `+${m.whatsapp_id}`;
+      const phoneDisplay = isRealPhone
+        ? m.phone_number
+        : '<span style="color:#aaa">—</span>';
+      return `<tr>
       <td>${id}</td>
       <td>${m.name}</td>
       <td>${m.whatsapp_id}</td>
+      <td>${phoneDisplay}</td>
       <td>${lastDone}</td>
     </tr>`;
-  }).join('');
+    })
+    .join("");
 
   return `<!DOCTYPE html>
 <html>
@@ -62,11 +72,11 @@ function renderMenteesHtml(mentees) {
     <a href="/mentees">Mentees</a>
     <a href="/logs">Logs</a>
     <a href="/mappings">JID Mappings</a>
-    <a href= "/docs">Docs</a>
+    <a href="/docs">Docs</a>
   </nav>
   <h1>Mentees</h1>
   <table>
-    <thead><tr><th>ID</th><th>Name</th><th>Phone Number</th><th>WhatsApp ID</th><th>Last Done At</th></tr></thead>
+    <thead><tr><th>ID</th><th>Name</th><th>WhatsApp ID</th><th>Phone Number</th><th>Last Done At</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>
 </body>
@@ -76,15 +86,17 @@ function renderMenteesHtml(mentees) {
 // Simple HTML table renderer for logs
 function renderLogsHtml(logs) {
   const entries = Object.entries(logs).reverse(); // newest first
-  const rows = entries.map(([id, l]) => {
-    const color = l.type === 'LATE' ? '#fff3cd' : '#d4edda';
-    return `<tr style="background:${color}">
+  const rows = entries
+    .map(([id, l]) => {
+      const color = l.type === "LATE" ? "#fff3cd" : "#d4edda";
+      return `<tr style="background:${color}">
       <td>${l.type}</td>
       <td>${l.whatsapp_id}</td>
       <td>${l.message}</td>
       <td>${new Date(l.timestamp).toLocaleString()}</td>
     </tr>`;
-  }).join('');
+    })
+    .join("");
 
   return `<!DOCTYPE html>
 <html>
@@ -105,7 +117,7 @@ function renderLogsHtml(logs) {
     <a href="/mentees">Mentees</a>
     <a href="/logs">Logs</a>
     <a href="/mappings">JID Mappings</a>
-    <a href= "/docs">Docs</a>
+    <a href="/docs">Docs</a>
   </nav>
   <h1>Chatbox Logs</h1>
   <table>
@@ -116,25 +128,31 @@ function renderLogsHtml(logs) {
 </html>`;
 }
 
-
 // HTML table renderer for JID mappings
 function renderMappingsHtml(data) {
   const entries = Object.entries(data.jidMappings);
-  const rows = entries.map(([jid, m]) => {
-    const type = m.type === 'business'
-      ? '<span style="background:#fff3cd;padding:2px 6px;border-radius:4px;font-size:0.75em">business</span>'
-      : '<span style="background:#d4edda;padding:2px 6px;border-radius:4px;font-size:0.75em">personal</span>';
-    const phoneNum = m.phone_number || '<span style="color:#aaa">—</span>';
-    const name = m.name || '<span style="color:#aaa">—</span>';
-    const updated = m.lastUpdated ? new Date(m.lastUpdated).toLocaleString() : '—';
-    return `<tr>
+  const rows = entries
+    .map(([jid, m]) => {
+      const typeLabel =
+        m.type === "business"
+          ? '<span style="background:#fff3cd;padding:2px 6px;border-radius:4px;font-size:0.75em">business</span>'
+          : m.type === "lid"
+            ? '<span style="background:#e0e7ff;padding:2px 6px;border-radius:4px;font-size:0.75em">lid</span>'
+            : '<span style="background:#d4edda;padding:2px 6px;border-radius:4px;font-size:0.75em">personal</span>';
+      const phoneNum = m.phone_number || '<span style="color:#aaa">—</span>';
+      const name = m.name || '<span style="color:#aaa">—</span>';
+      const updated = m.lastUpdated
+        ? new Date(m.lastUpdated).toLocaleString()
+        : "—";
+      return `<tr>
       <td style="font-size:0.8em;color:#666">${jid}</td>
       <td>${name}</td>
       <td><strong>${phoneNum}</strong></td>
-      <td>${type}</td>
+      <td>${typeLabel}</td>
       <td style="font-size:0.8em">${updated}</td>
     </tr>`;
-  }).join('');
+    })
+    .join("");
 
   return `<!DOCTYPE html>
 <html>
@@ -171,8 +189,10 @@ const server = http.createServer((req, res) => {
   const url = req.url;
 
   // ----- Home -----
-  if (url === '/') {
-    return sendHtml(res, `<!DOCTYPE html>
+  if (url === "/") {
+    return sendHtml(
+      res,
+      `<!DOCTYPE html>
 <html>
 <head>
   <title>Drill Bot</title>
@@ -191,43 +211,63 @@ const server = http.createServer((req, res) => {
   <a href="/mentees">Mentees</a>
   <a href="/logs">Logs</a>
   <a href="/mappings">JID Mappings</a>
-  <a href= "/docs">Docs</a>
+  <a href="/docs">Docs</a>
 </body>
-</html>`);
+</html>`,
+    );
   }
 
   // ----- Mentees -----
-  if (url === '/mentees') {
+  if (url === "/mentees") {
     const data = readJsonFile(menteesPath);
-    if (!data) return sendJson(res, { error: 'mentees.json not found' }, 404);
+    if (!data) return sendJson(res, { error: "mentees.json not found" }, 404);
     return sendHtml(res, renderMenteesHtml(data));
   }
 
   // ----- Logs -----
-  if (url === '/logs') {
+  if (url === "/logs") {
     const data = readJsonFile(logsPath);
-    if (!data) return sendJson(res, { error: 'chatbox_logs.json not found' }, 404);
+    if (!data)
+      return sendJson(res, { error: "chatbox_logs.json not found" }, 404);
     return sendHtml(res, renderLogsHtml(data));
   }
 
-  // ----- JID Mappings (raw JSON) -----
-  if (url === '/mappings') {
+  // ----- JID Mappings (HTML table) -----
+  if (url === "/mappings") {
     const data = readJsonFile(jidMappingsPath);
-    if (!data) return sendJson(res, { error: 'jidMappings.json not found' }, 404);
-    return sendJson(res, data);
+    if (!data)
+      return sendJson(res, { error: "jidMappings.json not found" }, 404);
+    return sendHtml(res, renderMappingsHtml(data));
   }
 
-   // ----- JID Mappings (raw JSON) -----
-  if (url === '/docs') {
-    const filePath = docsPath;
-    fs.readFile(filePath, 'utf8', (err, data) => {
-      if (err) return sendJson(res, { error: 'Documentation (bot-presentation.html) not found' }, 404);
-      return sendHtml(res, data);
-    });
+  // ----- JID Mappings (raw JSON) -----
+  if (url === "/docs") {
+    if (!fs.existsSync(docsPath)) {
+      return sendJson(
+        res,
+        { error: "bot-presentation.html not found in project root" },
+        404,
+      );
+    }
+    return sendHtml(res, fs.readFileSync(docsPath, "utf8"));
+  }
+
+  // ----- Late mentees (JSON) -----
+  if (url === "/late") {
+    const late = getLatePeople(); // uses LATE_THRESHOLD_DAYS from config.js
+    return sendJson(
+      res,
+      late.map((m) => ({
+        name: m.name,
+        whatsapp_id: m.whatsapp_id,
+        phone_number: m.phone_number || null,
+        last_done_at: m.last_done_at,
+      })),
+    );
   }
 
   // ----- 404 -----
-  sendJson(res, { error: 'Not found' }, 404);
+  sendJson(res, { error: "Not found" }, 404);
 });
 
 server.listen(PORT, () => {
@@ -238,21 +278,26 @@ server.listen(PORT, () => {
 function startSelfPing() {
   const serviceUrl = process.env.RENDER_EXTERNAL_URL;
   if (!serviceUrl) {
-    console.log('ℹ️  RENDER_EXTERNAL_URL not set — self-ping disabled (fine for local dev).');
+    console.log(
+      "ℹ️  RENDER_EXTERNAL_URL not set — self-ping disabled (fine for local dev).",
+    );
     return;
   }
-  setInterval(async () => {
-    try {
-      await fetch(`${serviceUrl}/`);
-      console.log('[PING] Self-ping sent to keep service alive.');
-    } catch (err) {
-      console.warn('[PING] Self-ping failed:', err.message);
-    }
-  }, 10 * 60 * 1000); // every 10 minutes
+  setInterval(
+    async () => {
+      try {
+        await fetch(`${serviceUrl}/`);
+        console.log("[PING] Self-ping sent to keep service alive.");
+      } catch (err) {
+        console.warn("[PING] Self-ping failed:", err.message);
+      }
+    },
+    10 * 60 * 1000,
+  ); // every 10 minutes
 }
 
 async function main() {
-  console.log('🚀 Starting WhatsApp Mentorship Bot...');
+  console.log("🚀 Starting WhatsApp Mentorship Bot...");
   await initializeBot();
 }
 

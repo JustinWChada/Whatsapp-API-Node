@@ -61,15 +61,19 @@ async function populateMenteesFromGroup(sock) {
       // participant.id is the full JID e.g. "263772345678@s.whatsapp.net" or "146922610385086@lid"
       const fullJid = participant.id;
       const whatsappId = extractPhoneFromJid(fullJid);
-      const jidType = fullJid.includes('@lid') ? 'business' : 'personal';
+      // All group participants appear as @lid in Baileys MD — not a business indicator
+      const jidType = 'lid';
       const name = `Member ${count} - ${whatsappId}`;
 
       // 1. Write to mentees.json
-      const isBusiness = fullJid.includes('@lid') || whatsappId.length > 15;
+      // NOTE: In Baileys multi-device, ALL group participants come back as @lid
+      // (Linked Device ID). These are internal WhatsApp IDs, NOT real phone numbers.
+      // phone_number will be populated later by bot.js when contacts.upsert fires
+      // and provides the actual @s.whatsapp.net JID with the real phone number.
       mentees[`mentee_${count}`] = {
         name,
         whatsapp_id: whatsappId,
-        phone_number: isBusiness ? whatsappId : '+' + whatsappId,
+        phone_number: null,
         last_done_at: null,
       };
 
