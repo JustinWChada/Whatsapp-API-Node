@@ -123,10 +123,16 @@ async function runReminderJob(client) {
 function setupReminderScheduler(client) {
   currentClient = client;
 
-  // IST is UTC+5:30, so 10:00 AM IST = 04:30 AM UTC
+  // IST is UTC+5:30, so 10:00 AM IST = 04:30 AM UTC: Original: 
   cron.schedule('0 10 * * *', () => {
     runReminderJob(client);
   }, { timezone: 'Asia/Kolkata' });
+  // IST is UTC+5:30, so 10:00 AM IST = 04:30 AM UTC
+
+  // // Testing: Run every 2 minutes
+  // cron.schedule('*/2 * * * *', () => {
+  //   runReminderJob(client);
+  // });
 
   console.log('[SCHEDULER] Reminder job scheduled for 10:00 AM IST daily.');
 }
